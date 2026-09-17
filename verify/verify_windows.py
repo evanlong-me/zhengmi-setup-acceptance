@@ -1,5 +1,7 @@
 """Assert the config files zhengmi-setup.ps1 writes on Windows."""
 
+from __future__ import annotations
+
 import io
 import json
 import os

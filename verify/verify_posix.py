@@ -1,5 +1,7 @@
 """Assert the config files zhengmi-setup.sh writes on Linux/macOS."""
 
+from __future__ import annotations
+
 import json
 import os
 import pathlib
