@@ -105,7 +105,7 @@ jobs:
         env:
           TOOL: ${{ matrix.tool }}
         run: |
-          export PYTHONUTF8=1 2>/dev/null || set PYTHONUTF8=1
+          $env:PYTHONUTF8 = "1"
           python verify/verify_windows.py
       - name: 校验工具已安装
         shell: powershell
