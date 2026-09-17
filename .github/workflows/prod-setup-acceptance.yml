@@ -1,0 +1,184 @@
+name: prod-setup-acceptance
+
+on:
+  workflow_dispatch:
+  push:
+
+env:
+  ZHENGMI_API_KEY: sk-prod-accept-000000
+  ZHENGMI_BASE_URL: http://106.54.47.97
+
+jobs:
+  # 生产网关脚本 + 自动安装：Linux 覆盖全部 11 个工具
+  gateway-linux:
+    name: ubuntu / ${{ matrix.tool }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        tool: [claude, claude-desktop, codex, gemini, opencode, hermes, pi, openclaw, codebuddy, kilo, cline]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 环境
+        run: |
+          echo "node: $(node -v 2>/dev/null || echo none)  npm: $(npm -v 2>/dev/null || echo none)"
+          echo "code: $(command -v code || echo none)  brew: $(command -v brew || echo none)"
+      - name: 文档命令执行生产脚本（含自动安装）
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          curl -fsSL "http://106.54.47.97/api/setup-scripts/$TOOL.sh" -o /tmp/zs.sh
+          echo "版本: $(grep -m1 -oE "SETUP_VERSION='[0-9]+'" /tmp/zs.sh)"
+          bash /tmp/zs.sh --yes
+      - name: 校验配置指向生产网关
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: python3 verify/verify_posix.py
+      - name: 校验工具已安装
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.hermes/bin:$HOME/.bun/bin:$PATH"
+          python3 verify/verify_install.py
+
+  # 生产网关脚本 + 自动安装：macOS 覆盖全部 11 个工具（含 brew cask / macOS 路径）
+  gateway-macos:
+    name: macos / ${{ matrix.tool }}
+    runs-on: macos-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        tool: [claude, claude-desktop, codex, gemini, opencode, hermes, pi, openclaw, codebuddy, kilo, cline]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 环境
+        run: |
+          echo "node: $(node -v 2>/dev/null || echo none)  npm: $(npm -v 2>/dev/null || echo none)"
+          echo "brew: $(command -v brew || echo none)  code: $(command -v code || echo none)"
+      - name: 文档命令执行生产脚本（含自动安装）
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          curl -fsSL "http://106.54.47.97/api/setup-scripts/$TOOL.sh" -o /tmp/zs.sh
+          echo "版本: $(grep -m1 -oE "SETUP_VERSION='[0-9]+'" /tmp/zs.sh)"
+          bash /tmp/zs.sh --yes
+      - name: 校验配置指向生产网关
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: python3 verify/verify_posix.py
+      - name: 校验工具已安装
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.hermes/bin:$PATH"
+          python3 verify/verify_install.py
+
+  # Windows：文档命令 irm | iex + 自动安装，覆盖全部 11 个工具
+  gateway-windows:
+    name: windows / ${{ matrix.tool }} / iex
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        tool: [claude, claude-desktop, codex, gemini, opencode, hermes, pi, openclaw, codebuddy, kilo, cline]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 环境
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+          "node=" + (node -v 2>$null)
+          "npm=" + (npm -v 2>$null)
+          "winget=" + (Get-Command winget -ErrorAction SilentlyContinue).Source
+      - name: 文档命令 irm | iex（含自动安装，PS 5.1）
+        shell: powershell
+        run: |
+                    irm http://106.54.47.97/api/setup-scripts/${{ matrix.tool }}.ps1 | iex
+      - name: 校验配置指向生产网关
+        shell: powershell
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: python verify/verify_windows.py
+      - name: 校验工具已安装
+        shell: powershell
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + "$env:APPDATA\npm;" + $env:Path
+          python verify/verify_install.py
+          if ($LASTEXITCODE -ne 0) { throw "install verification failed" }
+
+  # 存盘执行路径：确认下载成文件后（BOM/ANSI 解析）也能安装并写对配置
+  saved-file:
+    name: saved-file / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载成文件后执行 kilo（含自动安装）
+        shell: bash
+        run: |
+          ext=sh; [ "${{ matrix.os }}" = "windows-latest" ] && ext=ps1
+          curl -fsSL "http://106.54.47.97/api/setup-scripts/kilo.$ext" -o "zs.$ext"
+          echo "首 3 字节: $(head -c 3 "zs.$ext" | od -An -tx1 | tr -d ' \n')"
+          if [ "$ext" = "ps1" ]; then
+            powershell -NoProfile -Command "& './zs.ps1' --yes"
+          else
+            bash "zs.$ext" --yes
+          fi
+      - name: 校验配置
+        shell: bash
+        run: python3 verify/verify_posix.py
+        env:
+          TOOL: kilo
+      - name: 校验工具已安装
+        shell: bash
+        env:
+          TOOL: kilo
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+          python3 verify/verify_install.py
+
+  # CDN 镜像：文档里的通用脚本命令 + 自动安装
+  cdn:
+    name: cdn / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: CDN 通用脚本（文档命令形式）
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            curl -fsSL https://s3.chatbot.js.cn/ai-zhengmi-docs/setup/zhengmi-setup.ps1 -o zs.ps1
+            powershell -NoProfile -Command "\$env:ZHENGMI_SETUP_TOOL='kilo'; & './zs.ps1' --yes"
+          else
+            curl -fsSL https://s3.chatbot.js.cn/ai-zhengmi-docs/setup/zhengmi-setup.sh \
+              | bash -s -- kilo --base-url http://106.54.47.97 --yes
+          fi
+      - name: 校验配置
+        shell: bash
+        env:
+          TOOL: kilo
+        run: python3 verify/verify_posix.py
+      - name: 校验工具已安装
+        shell: bash
+        env:
+          TOOL: kilo
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+          python3 verify/verify_install.py
