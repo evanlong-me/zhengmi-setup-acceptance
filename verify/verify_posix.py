@@ -47,6 +47,10 @@ if TOOL == "claude":
         env = load_json(f).get("env", {})
         check(env.get("ANTHROPIC_BASE_URL") == BASE_URL, "ANTHROPIC_BASE_URL 正确")
         check(env.get("ANTHROPIC_AUTH_TOKEN") == API_KEY, "ANTHROPIC_AUTH_TOKEN 正确")
+    onboarding = HOME / ".claude.json"
+    check(onboarding.exists(), f"{onboarding} 存在")
+    if onboarding.exists():
+        check(load_json(onboarding).get("hasCompletedOnboarding") is True, "hasCompletedOnboarding 已置 true（跳过登录选择）")
 
 elif TOOL == "codex":
     d = HOME / ".codex"
@@ -104,6 +108,10 @@ elif TOOL == "openclaw":
                   HOME / ".openclaw" / "agents" / "main" / "agent" / "models.json"]
     found = [c for c in candidates if c.exists()]
     check(bool(found), "openclaw 配置文件已写入")
+    main_cfg = HOME / ".openclaw" / "openclaw.json"
+    if main_cfg.exists():
+        primary = dig(load_json(main_cfg), "agents", "defaults", "model", "primary")
+        check(isinstance(primary, str) and primary.startswith("zhengmi-"), "agents.defaults.model.primary 指向 zhengmi")
     for c in found:
         check(BASE_URL in c.read_text(encoding="utf-8", errors="ignore"), f"{c.name} 含网关地址")
 

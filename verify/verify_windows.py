@@ -76,6 +76,10 @@ if TOOL == "claude":
         env = load_json(f).get("env", {})
         check(env.get("ANTHROPIC_BASE_URL") == BASE_URL, "ANTHROPIC_BASE_URL correct")
         check(env.get("ANTHROPIC_AUTH_TOKEN") == API_KEY, "ANTHROPIC_AUTH_TOKEN correct")
+    onboarding = HOME / ".claude.json"
+    check(onboarding.exists(), f"{onboarding} exists")
+    if onboarding.exists():
+        check(load_json(onboarding).get("hasCompletedOnboarding") is True, "hasCompletedOnboarding is true (skips login picker)")
 
 elif TOOL == "claude-desktop":
     # Setup-ClaudeDesktop writes under LOCALAPPDATA on Windows and ~/.config elsewhere
@@ -128,6 +132,11 @@ elif TOOL == "pi":
 elif TOOL == "openclaw":
     hits = scan_for_url([HOME / ".openclaw"])
     check(bool(hits), "openclaw config contains gateway URL")
+    main_cfg = HOME / ".openclaw" / "openclaw.json"
+    if main_cfg.exists():
+        primary = ((load_json(main_cfg).get("agents") or {}).get("defaults") or {}).get("model") or {}
+        primary = primary.get("primary") if isinstance(primary, dict) else None
+        check(isinstance(primary, str) and primary.startswith("zhengmi-"), "agents.defaults.model.primary points at zhengmi")
     for h in hits[:3]:
         print("       wrote:", h)
 

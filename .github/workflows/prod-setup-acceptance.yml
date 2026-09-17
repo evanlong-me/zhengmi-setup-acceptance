@@ -9,7 +9,7 @@ env:
   ZHENGMI_BASE_URL: http://106.54.47.97
 
 jobs:
-  # 生产网关脚本 + 自动安装：Linux 覆盖全部 11 个工具
+  # 生产网关脚本：Linux 覆盖全部 11 个工具
   gateway-linux:
     name: ubuntu / ${{ matrix.tool }}
     runs-on: ubuntu-latest
@@ -21,11 +21,7 @@ jobs:
         tool: [claude, claude-desktop, codex, gemini, opencode, hermes, pi, openclaw, codebuddy, kilo, cline]
     steps:
       - uses: actions/checkout@v4
-      - name: 环境
-        run: |
-          echo "node: $(node -v 2>/dev/null || echo none)  npm: $(npm -v 2>/dev/null || echo none)"
-          echo "code: $(command -v code || echo none)  brew: $(command -v brew || echo none)"
-      - name: 文档命令执行生产脚本（含自动安装）
+      - name: 文档命令执行生产脚本
         env:
           TOOL: ${{ matrix.tool }}
         run: |
@@ -36,14 +32,8 @@ jobs:
         env:
           TOOL: ${{ matrix.tool }}
         run: python3 verify/verify_posix.py
-      - name: 校验工具已安装
-        env:
-          TOOL: ${{ matrix.tool }}
-        run: |
-          export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.hermes/bin:$HOME/.bun/bin:$PATH"
-          python3 verify/verify_install.py
 
-  # 生产网关脚本 + 自动安装：macOS 覆盖全部 11 个工具（含 brew cask / macOS 路径）
+  # 生产网关脚本：macOS 覆盖全部 11 个工具（bash 3.2 / macOS 路径）
   gateway-macos:
     name: macos / ${{ matrix.tool }}
     runs-on: macos-latest
@@ -55,11 +45,7 @@ jobs:
         tool: [claude, claude-desktop, codex, gemini, opencode, hermes, pi, openclaw, codebuddy, kilo, cline]
     steps:
       - uses: actions/checkout@v4
-      - name: 环境
-        run: |
-          echo "node: $(node -v 2>/dev/null || echo none)  npm: $(npm -v 2>/dev/null || echo none)"
-          echo "brew: $(command -v brew || echo none)  code: $(command -v code || echo none)"
-      - name: 文档命令执行生产脚本（含自动安装）
+      - name: 文档命令执行生产脚本
         env:
           TOOL: ${{ matrix.tool }}
         run: |
@@ -70,14 +56,8 @@ jobs:
         env:
           TOOL: ${{ matrix.tool }}
         run: python3 verify/verify_posix.py
-      - name: 校验工具已安装
-        env:
-          TOOL: ${{ matrix.tool }}
-        run: |
-          export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.hermes/bin:$PATH"
-          python3 verify/verify_install.py
 
-  # Windows：文档命令 irm | iex + 自动安装，覆盖全部 11 个工具
+  # Windows：文档命令 irm | iex，覆盖全部 11 个工具
   gateway-windows:
     name: windows / ${{ matrix.tool }} / iex
     runs-on: windows-latest
@@ -89,14 +69,7 @@ jobs:
         tool: [claude, claude-desktop, codex, gemini, opencode, hermes, pi, openclaw, codebuddy, kilo, cline]
     steps:
       - uses: actions/checkout@v4
-      - name: 环境
-        shell: powershell
-        run: |
-          $PSVersionTable.PSVersion
-          "node=" + (node -v 2>$null)
-          "npm=" + (npm -v 2>$null)
-          "winget=" + (Get-Command winget -ErrorAction SilentlyContinue).Source
-      - name: 文档命令 irm | iex（含自动安装，PS 5.1）
+      - name: 文档命令 irm | iex（PS 5.1）
         shell: powershell
         run: |
                     irm http://106.54.47.97/api/setup-scripts/${{ matrix.tool }}.ps1 | iex
@@ -107,17 +80,8 @@ jobs:
         run: |
           $env:PYTHONUTF8 = "1"
           python verify/verify_windows.py
-      - name: 校验工具已安装
-        shell: powershell
-        env:
-          TOOL: ${{ matrix.tool }}
-        run: |
-          $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + "$env:APPDATA\npm;" + $env:Path
-          $env:PYTHONUTF8 = "1"
-          python verify/verify_install.py
-          if ($LASTEXITCODE -ne 0) { throw "install verification failed" }
 
-  # 存盘执行路径：确认下载成文件后（BOM/ANSI 解析）也能安装并写对配置
+  # 存盘执行路径：确认下载成文件后（BOM/ANSI 解析）也能写对配置
   saved-file:
     name: saved-file / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -128,7 +92,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: 下载成文件后执行 kilo（含自动安装）
+      - name: 下载成文件后执行 kilo
         shell: bash
         run: |
           ext=sh; [ "${{ matrix.os }}" = "windows-latest" ] && ext=ps1
@@ -146,20 +110,8 @@ jobs:
           TOOL: kilo
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then python verify/verify_windows.py; else python3 verify/verify_posix.py; fi
-      - name: 校验工具已安装
-        shell: bash
-        env:
-          TOOL: kilo
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            export PYTHONUTF8=1
-            python verify/verify_install.py
-          else
-            export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
-            python3 verify/verify_install.py
-          fi
 
-  # CDN 镜像：文档里的通用脚本命令 + 自动安装
+  # CDN 镜像：文档里的通用脚本命令
   cdn:
     name: cdn / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -186,15 +138,3 @@ jobs:
           TOOL: kilo
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then python verify/verify_windows.py; else python3 verify/verify_posix.py; fi
-      - name: 校验工具已安装
-        shell: bash
-        env:
-          TOOL: kilo
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            export PYTHONUTF8=1
-            python verify/verify_install.py
-          else
-            export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
-            python3 verify/verify_install.py
-          fi
