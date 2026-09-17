@@ -113,6 +113,17 @@ elif TOOL == "kilo":
         check(BASE_URL in text, "kilo.jsonc 含网关地址")
         check(API_KEY in text, "kilo.jsonc 含密钥")
 
+elif TOOL == "claude-desktop":
+    # Claude Desktop 是 GUI 应用；Linux 上没有官方版本，脚本只给出下载指引。
+    if sys.platform == "darwin":
+        roots = [HOME / "Library" / "Application Support" / "Claude-3p", HOME / ".config" / "Claude-3p"]
+        hits = [p for r in roots if r.exists() for p in r.rglob("*.json") if BASE_URL in p.read_text(encoding="utf-8", errors="ignore")]
+        check(bool(hits), "Claude Desktop 配置含网关地址（macOS）")
+        for h in hits[:3]:
+            print("       写入:", h)
+    else:
+        check(True, "Claude Desktop 在 Linux 无官方版本，跳过配置校验")
+
 elif TOOL in ("codebuddy", "cline"):
     hits = []
     for base in (HOME / ".codebuddy", HOME / ".kilo", HOME / ".cline",
