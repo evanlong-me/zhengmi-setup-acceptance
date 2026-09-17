@@ -27,11 +27,30 @@ EXTRA_DIRS = [
 ]
 
 
+SUFFIXES = ("", ".exe", ".cmd", ".ps1", ".bat")
+
+
+def npm_global_bin() -> pathlib.Path | None:
+    try:
+        out = subprocess.run(["npm", "prefix", "-g"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    prefix = (out.stdout or "").strip()
+    return pathlib.Path(prefix) / ("bin" if os.name != "nt" else "") if prefix else None
+
+
 def on_path(name: str) -> str | None:
-    for d in EXTRA_DIRS:
-        cand = d / name
-        if cand.exists():
-            return str(cand)
+    # Windows 上的可执行文件带后缀（claude 装成 claude.exe），每个目录都要逐个后缀试；
+    # npm 的全局 bin 位置由 npm prefix -g 决定，不要硬编码 /usr/local/bin。
+    npm_bin = npm_global_bin()
+    search_dirs = ([npm_bin] if npm_bin else []) + list(EXTRA_DIRS)
+    for d in search_dirs:
+        if not d or not d.exists():
+            continue
+        for suffix in SUFFIXES:
+            cand = d / f"{name}{suffix}"
+            if cand.exists():
+                return str(cand)
     found = shutil.which(name)
     if found:
         return found

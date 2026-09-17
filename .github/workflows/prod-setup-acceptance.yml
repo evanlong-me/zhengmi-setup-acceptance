@@ -104,13 +104,16 @@ jobs:
         shell: powershell
         env:
           TOOL: ${{ matrix.tool }}
-        run: python verify/verify_windows.py
+        run: |
+          export PYTHONUTF8=1 2>/dev/null || set PYTHONUTF8=1
+          python verify/verify_windows.py
       - name: 校验工具已安装
         shell: powershell
         env:
           TOOL: ${{ matrix.tool }}
         run: |
           $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + "$env:APPDATA\npm;" + $env:Path
+          $env:PYTHONUTF8 = "1"
           python verify/verify_install.py
           if ($LASTEXITCODE -ne 0) { throw "install verification failed" }
 
@@ -136,18 +139,25 @@ jobs:
           else
             bash "zs.$ext" --yes
           fi
+      # Windows 走 ps1/PS 路径，必须用 Windows 版校验（posix 版不认识 APPDATA 与 .exe 后缀）
       - name: 校验配置
         shell: bash
-        run: python3 verify/verify_posix.py
         env:
           TOOL: kilo
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then python verify/verify_windows.py; else python3 verify/verify_posix.py; fi
       - name: 校验工具已安装
         shell: bash
         env:
           TOOL: kilo
         run: |
-          export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
-          python3 verify/verify_install.py
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            export PYTHONUTF8=1
+            python verify/verify_install.py
+          else
+            export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+            python3 verify/verify_install.py
+          fi
 
   # CDN 镜像：文档里的通用脚本命令 + 自动安装
   cdn:
@@ -174,11 +184,17 @@ jobs:
         shell: bash
         env:
           TOOL: kilo
-        run: python3 verify/verify_posix.py
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then python verify/verify_windows.py; else python3 verify/verify_posix.py; fi
       - name: 校验工具已安装
         shell: bash
         env:
           TOOL: kilo
         run: |
-          export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
-          python3 verify/verify_install.py
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            export PYTHONUTF8=1
+            python verify/verify_install.py
+          else
+            export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+            python3 verify/verify_install.py
+          fi
