@@ -85,6 +85,8 @@ jobs:
           powershell -NoProfile -Command "irm http://106.54.47.97/api/setup-scripts/windows/${{ matrix.tool }}.ps1 | iex"
           Set-Content "$HOME\zs.exit" $LASTEXITCODE
           Get-Content "$HOME\zs.exit"
+          # 退出码已交给校验步骤判断（claude-desktop 对 http 网关应为 1）；runner 会用最后的 $LASTEXITCODE 决定 step 成败，这里清零
+          $global:LASTEXITCODE = 0
       - name: 校验配置指向生产网关
         shell: powershell
         env:
