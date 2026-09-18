@@ -69,6 +69,40 @@ print(f"== {TOOL} on Windows ==")
 print(f"   HOME={HOME}")
 print(f"   APPDATA={APPDATA}")
 
+# The run step stores the script's exit code in ~/zs.exit (missing file = 0 for the older direct runs)
+EXIT_FILE = HOME / "zs.exit"
+EXIT_CODE = int(EXIT_FILE.read_text().strip() or "0") if EXIT_FILE.exists() else 0
+HTTPS_OR_LOOPBACK = BASE_URL.startswith("https://") or BASE_URL.startswith(("http://127.0.0.1", "http://localhost"))
+
+if TOOL == "claude-desktop":
+    # Claude Desktop only accepts https (http on loopback only); the script must exit 1 before writing anything.
+    roots = [LOCALAPPDATA / "Claude-3p", APPDATA / "Claude"]
+    written = [p for r in roots if r.exists() for p in r.rglob("*.json")]
+    if not HTTPS_OR_LOOPBACK:
+        check(EXIT_CODE == 1, f"http gateway URL is refused (exit code {EXIT_CODE})")
+        check(not written, "nothing written when refusing")
+    else:
+        check(EXIT_CODE == 0, f"script succeeded (exit code {EXIT_CODE})")
+        hits = [p for p in written if p.parent.name == "configLibrary" and BASE_URL in p.read_text(encoding="utf-8", errors="ignore")]
+        check(bool(hits), "configLibrary profile contains gateway URL")
+        dev = [p for p in written if p.name == "developer_settings.json" and load_json(p).get("allowDevTools") is True]
+        check(len(dev) == 2, "developer mode enabled in both Claude and Claude-3p")
+elif TOOL == "cline":
+    check(EXIT_CODE == 0, f"script succeeded (exit code {EXIT_CODE})")
+    state = HOME / ".cline" / "data" / "globalState.json"
+    secrets = HOME / ".cline" / "data" / "secrets.json"
+    if state.exists():
+        data = load_json(state)
+        check(data.get("openAiBaseUrl") == BASE_URL + "/v1", "Cline CLI globalState.openAiBaseUrl points at gateway /v1")
+        check(data.get("apiProvider") == "openai", "Cline CLI apiProvider = openai")
+        check(secrets.exists() and load_json(secrets).get("openAiApiKey") == API_KEY, "Cline CLI secrets.openAiApiKey correct")
+    else:
+        check(True, "no Cline CLI state seeded; script only prints the extension steps")
+    polluted = [p for p in APPDATA.rglob("settings.json") if '"cline.' in p.read_text(encoding="utf-8", errors="ignore")] if APPDATA.exists() else []
+    check(not polluted, "no dead cline.* keys written into editor settings.json")
+else:
+    check(EXIT_CODE == 0, f"script succeeded (exit code {EXIT_CODE})")
+
 if TOOL == "claude":
     f = HOME / ".claude" / "settings.json"
     check(f.exists(), f"{f} exists")
@@ -81,13 +115,8 @@ if TOOL == "claude":
     if onboarding.exists():
         check(load_json(onboarding).get("hasCompletedOnboarding") is True, "hasCompletedOnboarding is true (skips login picker)")
 
-elif TOOL == "claude-desktop":
-    # Setup-ClaudeDesktop writes under LOCALAPPDATA on Windows and ~/.config elsewhere
-    roots = [LOCALAPPDATA / "Claude-3p", HOME / ".config" / "Claude-3p"]
-    hits = scan_for_url(roots)
-    check(bool(hits), "Claude Desktop config contains gateway URL")
-    for h in hits[:3]:
-        print("       wrote:", h)
+elif TOOL in ("claude-desktop", "cline"):
+    pass  # verified above by exit code
 
 elif TOOL == "codex":
     d = HOME / ".codex"
@@ -132,6 +161,7 @@ elif TOOL == "pi":
 elif TOOL == "openclaw":
     hits = scan_for_url([HOME / ".openclaw"])
     check(bool(hits), "openclaw config contains gateway URL")
+    check(not (HOME / ".openclaw" / "agents" / "main" / "agent" / "models.json").exists(), "agents/main/agent/models.json is left to the gateway")
     main_cfg = HOME / ".openclaw" / "openclaw.json"
     if main_cfg.exists():
         primary = ((load_json(main_cfg).get("agents") or {}).get("defaults") or {}).get("model") or {}
@@ -154,13 +184,6 @@ elif TOOL == "kilo":
     else:
         hits = scan_for_url([HOME / ".config" / "kilo"])
         check(bool(hits), "kilo config contains gateway URL")
-
-elif TOOL == "cline":
-    bases = [APPDATA / "Code" / "User", APPDATA / "Cursor" / "User", HOME / ".cline"]
-    hits = scan_for_url(bases)
-    check(bool(hits), "Cline config contains gateway URL")
-    for h in hits[:3]:
-        print("       wrote:", h)
 
 else:
     check(False, f"no verifier implemented for {TOOL}")

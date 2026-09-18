@@ -40,6 +40,45 @@ def dig(data, *keys):
 
 print(f"== {TOOL} on {sys.platform} ==")
 
+# 脚本退出码由运行步骤写到 ~/zs.exit（没有该文件时视为 0，兼容旧的直接执行方式）
+EXIT_FILE = HOME / "zs.exit"
+EXIT_CODE = int(EXIT_FILE.read_text().strip() or "0") if EXIT_FILE.exists() else 0
+HTTPS_OR_LOOPBACK = BASE_URL.startswith("https://") or BASE_URL.startswith(("http://127.0.0.1", "http://localhost"))
+
+if TOOL == "claude-desktop":
+    # Claude Desktop 只接受 https（http 仅限回环），脚本对不合格地址必须在写任何文件前退出 1。
+    roots = [HOME / "Library" / "Application Support" / "Claude-3p", HOME / ".config" / "Claude-3p",
+             HOME / "Library" / "Application Support" / "Claude", HOME / ".config" / "Claude"]
+    written = [p for r in roots if r.exists() for p in r.rglob("*.json")]
+    if not HTTPS_OR_LOOPBACK:
+        check(EXIT_CODE == 1, f"http 网关地址被明确拒绝（退出码 {EXIT_CODE}）")
+        check(not written, "拒绝时不写任何 Claude Desktop 文件")
+    else:
+        check(EXIT_CODE == 0, f"脚本成功（退出码 {EXIT_CODE}）")
+        hits = [p for p in written if p.parent.name == "configLibrary" and BASE_URL in p.read_text(encoding="utf-8", errors="ignore")]
+        check(bool(hits), "configLibrary 里的配置含网关地址")
+        dev = [p for p in written if p.name == "developer_settings.json" and load_json(p).get("allowDevTools") is True]
+        check(len(dev) == 2, "Claude 与 Claude-3p 两个目录都开启了开发者模式")
+elif TOOL == "cline":
+    check(EXIT_CODE == 0, f"脚本成功（退出码 {EXIT_CODE}）")
+    state = HOME / ".cline" / "data" / "globalState.json"
+    secrets = HOME / ".cline" / "data" / "secrets.json"
+    if state.exists():
+        data = load_json(state)
+        check(data.get("openAiBaseUrl") == BASE_URL + "/v1", "Cline CLI globalState.openAiBaseUrl 指向网关 /v1")
+        check(data.get("apiProvider") == "openai", "Cline CLI apiProvider = openai")
+        check(secrets.exists() and load_json(secrets).get("openAiApiKey") == API_KEY, "Cline CLI secrets.openAiApiKey 正确")
+    else:
+        check(True, "未预置 Cline CLI 状态，脚本只打印扩展的手动步骤")
+    # 扩展没有 settings.json 配置项：任何 cline.* 键都不得再写进编辑器设置
+    polluted = []
+    for base in (HOME / ".config", HOME / "Library" / "Application Support"):
+        if base.exists():
+            polluted += [p for p in base.rglob("settings.json") if '"cline.' in p.read_text(encoding="utf-8", errors="ignore")]
+    check(not polluted, "没有把已失效的 cline.* 键写进编辑器 settings.json")
+else:
+    check(EXIT_CODE == 0, f"脚本成功（退出码 {EXIT_CODE}）")
+
 if TOOL == "claude":
     f = HOME / ".claude" / "settings.json"
     check(f.exists(), f"{f} 存在")
@@ -104,11 +143,11 @@ elif TOOL == "pi":
         check(BASE_URL in json.dumps(load_json(f)), "models.json 含网关地址")
 
 elif TOOL == "openclaw":
-    candidates = [HOME / ".openclaw" / "openclaw.json",
-                  HOME / ".openclaw" / "agents" / "main" / "agent" / "models.json"]
-    found = [c for c in candidates if c.exists()]
-    check(bool(found), "openclaw 配置文件已写入")
     main_cfg = HOME / ".openclaw" / "openclaw.json"
+    found = [main_cfg] if main_cfg.exists() else []
+    check(bool(found), "openclaw.json 已写入")
+    # agents/main/agent/models.json 由网关生成，脚本不再直接写它
+    check(not (HOME / ".openclaw" / "agents" / "main" / "agent" / "models.json").exists(), "没有直接写 agents/main/agent/models.json")
     if main_cfg.exists():
         primary = dig(load_json(main_cfg), "agents", "defaults", "model", "primary")
         check(isinstance(primary, str) and primary.startswith("zhengmi-"), "agents.defaults.model.primary 指向 zhengmi")
@@ -123,18 +162,10 @@ elif TOOL == "kilo":
         check(BASE_URL in text, "kilo.jsonc 含网关地址")
         check(API_KEY in text, "kilo.jsonc 含密钥")
 
-elif TOOL == "claude-desktop":
-    # Claude Desktop 是 GUI 应用；Linux 上没有官方版本，脚本只给出下载指引。
-    if sys.platform == "darwin":
-        roots = [HOME / "Library" / "Application Support" / "Claude-3p", HOME / ".config" / "Claude-3p"]
-        hits = [p for r in roots if r.exists() for p in r.rglob("*.json") if BASE_URL in p.read_text(encoding="utf-8", errors="ignore")]
-        check(bool(hits), "Claude Desktop 配置含网关地址（macOS）")
-        for h in hits[:3]:
-            print("       写入:", h)
-    else:
-        check(True, "Claude Desktop 在 Linux 无官方版本，跳过配置校验")
+elif TOOL in ("claude-desktop", "cline"):
+    pass  # 上面已按退出码校验
 
-elif TOOL in ("codebuddy", "cline"):
+elif TOOL == "codebuddy":
     hits = []
     for base in (HOME / ".codebuddy", HOME / ".kilo", HOME / ".cline",
                  HOME / ".config", HOME / "Library" / "Application Support"):

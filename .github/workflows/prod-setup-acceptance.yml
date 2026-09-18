@@ -9,7 +9,7 @@ env:
   ZHENGMI_BASE_URL: http://106.54.47.97
 
 jobs:
-  # 生产网关脚本：Linux 覆盖全部 11 个工具
+  # 生产网关脚本：Linux 覆盖全部 11 个工具（/api/setup-scripts/linux/<tool>.sh）
   gateway-linux:
     name: ubuntu / ${{ matrix.tool }}
     runs-on: ubuntu-latest
@@ -25,9 +25,13 @@ jobs:
         env:
           TOOL: ${{ matrix.tool }}
         run: |
-          curl -fsSL "http://106.54.47.97/api/setup-scripts/$TOOL.sh" -o /tmp/zs.sh
+          curl -fsSL "http://106.54.47.97/api/setup-scripts/linux/$TOOL.sh" -o /tmp/zs.sh
           echo "版本: $(grep -m1 -oE "SETUP_VERSION='[0-9]+'" /tmp/zs.sh)"
-          bash /tmp/zs.sh --yes
+          # cline 只在已有 CLI 状态文件时合并写入；预置一个空状态让这条路径被覆盖到。
+          if [ "$TOOL" = cline ]; then mkdir -p ~/.cline/data && echo '{}' > ~/.cline/data/globalState.json; fi
+          # 退出码交给校验脚本：Claude Desktop 对 http 网关必须明确拒绝（退出 1），其他工具必须成功。
+          set +e; bash /tmp/zs.sh --yes; echo $? > ~/zs.exit; set -e
+          cat ~/zs.exit
       - name: 校验配置指向生产网关
         env:
           TOOL: ${{ matrix.tool }}
@@ -49,9 +53,13 @@ jobs:
         env:
           TOOL: ${{ matrix.tool }}
         run: |
-          curl -fsSL "http://106.54.47.97/api/setup-scripts/$TOOL.sh" -o /tmp/zs.sh
+          curl -fsSL "http://106.54.47.97/api/setup-scripts/macos/$TOOL.sh" -o /tmp/zs.sh
           echo "版本: $(grep -m1 -oE "SETUP_VERSION='[0-9]+'" /tmp/zs.sh)"
-          bash /tmp/zs.sh --yes
+          # cline 只在已有 CLI 状态文件时合并写入；预置一个空状态让这条路径被覆盖到。
+          if [ "$TOOL" = cline ]; then mkdir -p ~/.cline/data && echo '{}' > ~/.cline/data/globalState.json; fi
+          # 退出码交给校验脚本：Claude Desktop 对 http 网关必须明确拒绝（退出 1），其他工具必须成功。
+          set +e; bash /tmp/zs.sh --yes; echo $? > ~/zs.exit; set -e
+          cat ~/zs.exit
       - name: 校验配置指向生产网关
         env:
           TOOL: ${{ matrix.tool }}
@@ -72,7 +80,11 @@ jobs:
       - name: 文档命令 irm | iex（PS 5.1）
         shell: powershell
         run: |
-                    irm http://106.54.47.97/api/setup-scripts/${{ matrix.tool }}.ps1 | iex
+          if ('${{ matrix.tool }}' -eq 'cline') { New-Item -ItemType Directory -Force "$HOME\.cline\data" | Out-Null; Set-Content "$HOME\.cline\data\globalState.json" '{}' }
+          # irm | iex 里的 exit 会结束当前 PowerShell，所以放到子进程里跑并记录退出码
+          powershell -NoProfile -Command "irm http://106.54.47.97/api/setup-scripts/windows/${{ matrix.tool }}.ps1 | iex"
+          Set-Content "$HOME\zs.exit" $LASTEXITCODE
+          Get-Content "$HOME\zs.exit"
       - name: 校验配置指向生产网关
         shell: powershell
         env:
@@ -81,7 +93,7 @@ jobs:
           $env:PYTHONUTF8 = "1"
           python verify/verify_windows.py
 
-  # 存盘执行路径：确认下载成文件后（BOM/ANSI 解析）也能写对配置
+  # 存盘执行路径：确认下载成文件后（BOM/ANSI 解析）也能写对配置（按系统取 <sys>/kilo.<ext>）
   saved-file:
     name: saved-file / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -95,8 +107,12 @@ jobs:
       - name: 下载成文件后执行 kilo
         shell: bash
         run: |
-          ext=sh; [ "${{ matrix.os }}" = "windows-latest" ] && ext=ps1
-          curl -fsSL "http://106.54.47.97/api/setup-scripts/kilo.$ext" -o "zs.$ext"
+          case "${{ matrix.os }}" in
+            windows-latest) sys=windows; ext=ps1 ;;
+            macos-latest) sys=macos; ext=sh ;;
+            *) sys=linux; ext=sh ;;
+          esac
+          curl -fsSL "http://106.54.47.97/api/setup-scripts/$sys/kilo.$ext" -o "zs.$ext"
           echo "首 3 字节: $(head -c 3 "zs.$ext" | od -An -tx1 | tr -d ' \n')"
           if [ "$ext" = "ps1" ]; then
             powershell -NoProfile -Command "& './zs.ps1' --yes"
@@ -111,7 +127,7 @@ jobs:
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then python verify/verify_windows.py; else python3 verify/verify_posix.py; fi
 
-  # CDN 镜像：文档里的通用脚本命令
+  # CDN 镜像：文档里的按系统脚本命令（publish-setup.py 上传的 <sys>/<tool>.<ext>）
   cdn:
     name: cdn / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -125,13 +141,17 @@ jobs:
       - name: CDN 通用脚本（文档命令形式）
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            curl -fsSL https://s3.chatbot.js.cn/ai-zhengmi-docs/setup/zhengmi-setup.ps1 -o zs.ps1
-            powershell -NoProfile -Command "\$env:ZHENGMI_SETUP_TOOL='kilo'; & './zs.ps1' --yes"
-          else
-            curl -fsSL https://s3.chatbot.js.cn/ai-zhengmi-docs/setup/zhengmi-setup.sh \
-              | bash -s -- kilo --base-url http://106.54.47.97 --yes
-          fi
+          case "${{ matrix.os }}" in
+            windows-latest)
+              curl -fsSL https://s3.chatbot.js.cn/ai-zhengmi-docs/setup/windows/kilo.ps1 -o zs.ps1
+              powershell -NoProfile -Command "& './zs.ps1' --yes" ;;
+            macos-latest)
+              curl -fsSL https://s3.chatbot.js.cn/ai-zhengmi-docs/setup/macos/kilo.sh \
+                | bash -s -- --base-url http://106.54.47.97 --yes ;;
+            *)
+              curl -fsSL https://s3.chatbot.js.cn/ai-zhengmi-docs/setup/linux/kilo.sh \
+                | bash -s -- --base-url http://106.54.47.97 --yes ;;
+          esac
       - name: 校验配置
         shell: bash
         env:
